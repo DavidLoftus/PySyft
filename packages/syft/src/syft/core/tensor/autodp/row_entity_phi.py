@@ -3,6 +3,7 @@ from __future__ import annotations
 
 # stdlib
 from collections.abc import Sequence
+import multiprocessing as mp
 from typing import Any
 from typing import Dict
 from typing import List
@@ -14,6 +15,7 @@ from typing import Union
 from google.protobuf.reflection import GeneratedProtocolMessageType
 import numpy as np
 import numpy.typing as npt
+import ray
 
 # relative
 from ....core.adp.entity import DataSubjectGroup as DSG
@@ -36,6 +38,7 @@ from .adp_tensor import ADPTensor
 from .initial_gamma import InitialGammaTensor
 from .intermediate_gamma import IntermediateGammaTensor as IGT
 from .single_entity_phi import SingleEntityPhiTensor
+from .util import ray_serialize
 
 
 @serializable()
@@ -51,6 +54,9 @@ class RowEntityPhiTensor(PassthroughTensor, ADPTensor):
     significant performance benefits over other DP tracking tensors. Note that when
     we refer to the number of 'rows' we simply refer to the length of the first dimension. This
     tensor can have an arbitrary number of dimensions."""
+
+    # flag for parallel serialization of REPT
+    _PARALLEL_SERDE = True
 
     def __init__(self, rows: Sequence, check_shape: bool = True):
         """Initialize a RowEntityPhiTensor
@@ -959,8 +965,25 @@ class RowEntityPhiTensor(PassthroughTensor, ADPTensor):
         if len(row_scalar_manager_index) != len(self.child):
             raise Exception("Length of scalar manager index must match row length")
 
+        if RowEntityPhiTensor._PARALLEL_SERDE:
+            cpu_count = mp.cpu_count()
+            sept_rows = self.child
+            k, m = divmod(len(sept_rows), cpu_count)
+            split_rows = [
+                ray_serialize.remote(
+                    sept_rows[i * k + min(i, m) : (i + 1) * k + min(i + 1, m)]  # noqa
+                )
+                for i in range(cpu_count)
+            ]
+            ray.get(split_rows)
+            rows: List = split_rows[0]
+            for lst in split_rows[1::]:
+                rows.extend(lst)
+        else:
+            rows = [serialize(x) for x in self.child]
+
         rept_pb = RowEntityPhiTensor_PB(
-            rows=[serialize(x) for x in self.child],
+            rows=rows,
             unique_entities=[serialize(x) for x in entity_list],
             unique_scalar_managers=[serialize(x) for x in scalar_manager_list],
             row_entity_index=serialize(np.array(row_entity_index)),
