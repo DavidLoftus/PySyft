@@ -1,6 +1,6 @@
 FROM python:3.9.9-slim as build
 
-RUN --mount=type=cache,target=/var/cache/apt \
+RUN \
   apt-get update && \
   apt-get install -y --no-install-recommends curl python3-dev gcc make
 
@@ -8,8 +8,7 @@ WORKDIR /app
 COPY grid/backend/requirements.txt /app
 
 # Allow installing dev dependencies to run tests
-RUN --mount=type=cache,target=/root/.cache \
-  pip install --user "uvicorn[standard]" gunicorn
+RUN pip install --user "uvicorn[standard]" gunicorn
 
 RUN if [ $(uname -m) = "x86_64" ]; then \
   pip install --user torch==1.10.0+cpu -f https://download.pytorch.org/whl/torch_stable.html; \
@@ -21,8 +20,7 @@ RUN if [ $(uname -m) != "x86_64" ]; then \
   pip install --user torch==1.10.0 -f https://download.pytorch.org/whl/torch_stable.html; \
   fi
 
-RUN --mount=type=cache,target=/root/.cache \
-  pip install --user -r requirements.txt
+RUN pip install --user -r requirements.txt
 
 # allow container to wait for other services
 ENV WAITFORIT_VERSION="v2.4.1"
@@ -49,8 +47,7 @@ RUN chmod +x /worker-start-reload.sh
 COPY --from=build /root/.local /root/.local
 COPY --from=build /usr/local/bin/waitforit /usr/local/bin/waitforit
 
-RUN --mount=type=cache,target=/root/.cache \
-  pip install --user watchdog pyyaml argh
+RUN pip install --user watchdog pyyaml argh
 
 WORKDIR /app
 
